@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Create Assistant</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0b0b;
+        --panel: #141414;
+        --text: #f2f2f2;
+        --muted: #9aa0a6;
+        --accent: #2f81f7;
+        --border: #2b2b2b;
+        --danger: #d64545;
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      .container {
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      h1 {
+        font-size: 18px;
+        margin: 0;
+      }
+
+      .subtitle {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      label {
+        font-size: 12px;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      input, textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        background: var(--panel);
+        color: var(--text);
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        box-sizing: border-box;
+      }
+
+      textarea {
+        min-height: 90px;
+        resize: vertical;
+      }
+
+      .actions {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 8px;
+      }
+
+      button {
+        border: none;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .primary {
+        background: var(--accent);
+        color: #fff;
+        flex: 1;
+      }
+
+      .secondary {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--border);
+      }
+
+      .error {
+        color: var(--danger);
+        font-size: 12px;
+        min-height: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div>
+        <h1>Create Assistant</h1>
+        <div class="subtitle">Add a new assistant role for Meeting Assistant.</div>
+      </div>
+
+      <div>
+        <label for="name">Assistant Name</label>
+        <input id="name" placeholder="e.g., Product Analyst" />
+      </div>
+
+      <div>
+        <label for="role">Role</label>
+        <input id="role" placeholder="e.g., Summarize meetings and highlight risks" />
+      </div>
+
+      <div>
+        <label for="description">Description</label>
+        <textarea id="description" placeholder="Optional details"></textarea>
+      </div>
+
+      <div class="error" id="error"></div>
+
+      <div class="actions">
+        <button class="secondary" id="cancel">Cancel</button>
+        <button class="primary" id="create">Create Assistant</button>
+      </div>
+    </div>
+
+    <script>
+      const { ipcRenderer } = window.require('electron');
+
+      const nameInput = document.getElementById('name');
+      const roleInput = document.getElementById('role');
+      const descriptionInput = document.getElementById('description');
+      const errorEl = document.getElementById('error');
+
+      const closeWindow = () => {
+        ipcRenderer.send('close-child-window', 'assistant');
+      };
+
+      document.getElementById('cancel').addEventListener('click', closeWindow);
+
+      document.getElementById('create').addEventListener('click', async () => {
+        errorEl.textContent = '';
+        const name = nameInput.value.trim();
+        const role = roleInput.value.trim();
+        const description = descriptionInput.value.trim();
+
+        if (!name) {
+          errorEl.textContent = 'Assistant name is required.';
+          return;
+        }
+
+        try {
+          const result = await ipcRenderer.invoke('settings-add-assistant', {
+            name,
+            role,
+            description
+          });
+
+          if (!result || !result.success) {
+            throw new Error(result?.error || 'Failed to create assistant');
+          }
+
+          const created = result.data;
+          await ipcRenderer.invoke('settings-save-assistant', created, created?.name || name);
+          closeWindow();
+        } catch (err) {
+          errorEl.textContent = err.message || 'Failed to create assistant.';
+        }
+      });
+    </script>
+  </body>
+</html>

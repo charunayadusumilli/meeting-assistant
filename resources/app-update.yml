@@ -1,0 +1,6 @@
+channel: latest
+provider: generic
+url: http://localhost:3000/updates
+updaterCacheDirName: meetingassistant-updater
+publisherName:
+  - Srinivas Thirunagari
