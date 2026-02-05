@@ -1,171 +1,108 @@
 /**
- * SessionService - Local-only session + streaming stub
+ * SessionService - Pulse Architecture Implementation
+ * Connects Electron Main Process to Backend (http://localhost:3000)
  */
-class SessionService {
+const { io } = require('socket.io-client');
+const { EventEmitter } = require('events');
+
+class SessionService extends EventEmitter {
   constructor() {
+    super();
+    this.socket = null;
     this.isActive = false;
-    this.isStarting = false;
     this.sessionId = null;
     this.accessToken = null;
     this.config = null;
-    this.eventListeners = new Map();
-    this.requestCounter = 0;
-    this.activeRequestId = null;
+    this.backendUrl = 'http://localhost:3000';
+    this.authService = null;
   }
 
   initialize(config) {
     this.config = config || {};
-    console.log('SessionService initialized in local mode');
+    this.backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
+    console.log('[SessionService] Initialized with backend:', this.backendUrl);
+    this.connect();
   }
 
-  setAuthService() {
-    // no-op for local mode
+  setAuthService(service) {
+    this.authService = service;
   }
 
   updateAccessToken(newToken) {
-    if (newToken) {
-      this.accessToken = newToken;
-    }
+    this.accessToken = newToken;
+  }
+
+  connect() {
+    if (this.socket) return;
+
+    this.socket = io(this.backendUrl, {
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      query: { source: 'main-process' }
+    });
+
+    this.socket.on('connect', () => {
+      console.log('[SessionService] Connected to backend');
+      this.emit('connection-state', { connected: true });
+    });
+
+    this.socket.on('disconnect', () => {
+      console.log('[SessionService] Disconnected from backend');
+      this.emit('connection-state', { connected: false });
+    });
+
+    // Handle responses from backend
+    this.socket.on('answer', (data) => this.emit('answer', data));
+    this.socket.on('response_start', (data) => this.emit('response_start', data));
+    this.socket.on('response_end', (data) => this.emit('response_end', data));
+    this.socket.on('transcript', (data) => this.emit('transcript', data));
+    this.socket.on('session-update', (data) => {
+      if (data.sessionId) this.sessionId = data.sessionId;
+      this.emit('session-update', data);
+    });
   }
 
   async startSession(sessionData, accessToken, sessionId) {
-    if (this.isActive || this.isStarting) {
-      console.warn('Session already active or starting');
+    if (!this.socket?.connected) {
+      console.warn('[SessionService] Cannot start session: valid connection required');
       return false;
     }
 
-    this.isStarting = true;
-    this.sessionId = sessionId || `local-session-${Date.now()}`;
-    this.accessToken = accessToken || 'local-dev-token';
-
+    this.sessionId = sessionId || this.sessionId;
     this.isActive = true;
-    this.isStarting = false;
+
+    // Notify backend
+    this.socket.emit('start_session', {
+      sessionId: this.sessionId,
+      ...sessionData
+    });
 
     this.emit('session-update', {
       status: 'ready',
       sessionId: this.sessionId,
-      startedAt: Date.now(),
-      ...sessionData
+      startedAt: Date.now()
     });
-
     return true;
   }
 
   async stopSession() {
-    if (!this.isActive && !this.isStarting) {
-      console.warn('No active session to stop');
-      return false;
-    }
-
-    await this.cleanup();
-    return true;
-  }
-
-  getSessionStatus() {
-    return {
-      isActive: this.isActive,
-      sessionId: this.sessionId,
-      backendConnected: false,
-      connections: { backend: null }
-    };
-  }
-
-  async cleanup() {
     this.isActive = false;
-    this.isStarting = false;
-    this.sessionId = null;
-    this.accessToken = null;
-    this.activeRequestId = null;
-    this.requestCounter = 0;
-  }
-
-  on(event, callback) {
-    if (!this.eventListeners.has(event)) {
-      this.eventListeners.set(event, []);
+    if (this.socket?.connected) {
+      this.socket.emit('stop_session', { sessionId: this.sessionId });
     }
-    this.eventListeners.get(event).push(callback);
-  }
-
-  off(event, callback) {
-    if (this.eventListeners.has(event)) {
-      const listeners = this.eventListeners.get(event);
-      const index = listeners.indexOf(callback);
-      if (index > -1) {
-        listeners.splice(index, 1);
-      }
-    }
-  }
-
-  emit(event, data) {
-    if (this.eventListeners.has(event)) {
-      this.eventListeners.get(event).forEach(callback => {
-        try {
-          callback(data);
-        } catch (error) {
-          console.error(`Error in event listener for ${event}:`, error);
-        }
-      });
-    }
-  }
-
-  isRelevantRequest(requestId) {
-    return requestId === undefined || requestId === null || requestId === this.activeRequestId;
-  }
-
-  startNewRequest() {
-    this.requestCounter += 1;
-    this.activeRequestId = this.requestCounter;
-    return this.activeRequestId;
-  }
-
-  prepareQuestionPayload(data) {
-    const payload = (data && typeof data === 'object' && !Array.isArray(data)) ? { ...data } : {};
-    payload.requestId = this.startNewRequest();
-    return payload;
-  }
-
-  sendToBackend(event, data) {
-    if (!this.isActive) {
-      console.warn('Session is not active; ignoring outbound event:', event);
-      return false;
-    }
-
-    if (event === 'question') {
-      const payload = this.prepareQuestionPayload(data);
-      const answerText = 'Local mode: backend not configured yet.';
-
-      this.emit('response_start', { requestId: payload.requestId });
-      this.emit('answer', {
-        requestId: payload.requestId,
-        content: answerText,
-        isFinal: true
-      });
-      this.emit('response_end', { requestId: payload.requestId });
-      return true;
-    }
-
-    if (event === 'recognizing_item' || event === 'recognized_item') {
-      this.emit('transcript', data);
-      return true;
-    }
-
-    if (event === 'clear') {
-      this.emit('clear', data);
-      return true;
-    }
-
-    this.emit(`backend-${event}`, data);
     return true;
   }
 
   sendMessageToBackend(message) {
-    return this.sendToBackend('message', message);
+    if (!this.socket?.connected) return false;
+    this.socket.emit('question', {
+      sessionId: this.sessionId,
+      content: message
+    });
+    return true;
   }
 }
 
 const sessionService = new SessionService();
-
-module.exports = {
-  SessionService,
-  sessionService
-};
+module.exports = { SessionService, sessionService };

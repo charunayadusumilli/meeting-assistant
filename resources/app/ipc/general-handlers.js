@@ -13,7 +13,8 @@ function registerGeneralHandlers({
   updateSessionWindowStateFromBounds,
   BrowserWindow,
   screen,
-  apiService
+  apiService,
+  createAssistantWindow
 }) {
   ipcMain.on('open-session-window', () => {
     createSessionWindow({ store, windowManager, BrowserWindow });
@@ -21,6 +22,11 @@ function registerGeneralHandlers({
 
   ipcMain.on('open-settings-window', () => {
     createSettingsWindow({ windowManager, BrowserWindow, screen, store });
+  });
+
+  ipcMain.on('open-assistant-window', () => {
+    console.log('Opening Assistant Window via IPC');
+    createAssistantWindow();
   });
 
   ipcMain.on('close-child-window', (event, windowName) => {

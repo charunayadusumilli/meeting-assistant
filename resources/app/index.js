@@ -271,6 +271,7 @@ if (!gotTheLock) {
       config,
       createSessionWindow: () => createSessionWindow({ store, windowManager, BrowserWindow }),
       createSettingsWindow: () => createSettingsWindow({ windowManager, BrowserWindow, screen, store }),
+      createAssistantWindow: () => createAssistantWindow({ windowManager, BrowserWindow }),
       positionSessionWindow,
       updateSessionWindowStateFromBounds,
       BrowserWindow,
