@@ -146,9 +146,7 @@ function registerSessionHandlers({ ipcMain, sessionService, apiService, authServ
         return { success: false, error: 'No access token available', errorType: 'auth' };
       }
 
-      const huddleId = sessionData.assistantId;
-      const isTrial = sessionData?.isTrial;
-      if (!huddleId) {
+      const huddleId = sessionData.assistantId; if (!huddleId) {
         console.error('Cannot start session: assistantId is required');
         await handleSessionStartFailure({ message: 'Assistant ID is required', errorType: 'validation' });
         return { success: false, error: 'Assistant ID is required', errorType: 'validation' };
@@ -158,7 +156,7 @@ function registerSessionHandlers({ ipcMain, sessionService, apiService, authServ
 
       let sessionResponse;
       try {
-        sessionResponse = await apiService.createSession(huddleId, { isTrial });
+        sessionResponse = await apiService.createSession(huddleId);
         console.log('Session created via API:', sessionResponse);
       } catch (apiError) {
         console.error('Failed to create session via API:', apiError);
@@ -196,6 +194,8 @@ function registerSessionHandlers({ ipcMain, sessionService, apiService, authServ
 
         const sessionWindow = createSessionWindow();
         if (sessionWindow) {
+          sessionWindow.sessionData = sessionData;
+          sessionWindow.sessionId = sessionId;
           if (isDev) {
             sessionWindow.webContents.openDevTools({ mode: 'detach' });
           }
@@ -288,7 +288,11 @@ function registerSessionHandlers({ ipcMain, sessionService, apiService, authServ
       BrowserWindow.getAllWindows().forEach((window) => {
         window.webContents.send('state-update', {
           type: 'SESSION_STARTED',
-          payload: { status: 'ready' }
+          payload: {
+            ...(sessionWindow.sessionData || {}),
+            sessionId: sessionWindow.sessionId,
+            status: 'ready'
+          }
         });
       });
     }

@@ -230,23 +230,22 @@ function registerSettingsHandlers({ ipcMain, windowManager, store, app }) {
 
       // Sync to Backend (Critical for LLM context)
       try {
-        const response = await fetch('http://localhost:3000/api/topics', {
+        const response = await fetch('http://127.0.0.1:3000/api/topics', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             name: created.name,
             description: created.description,
-            systemPrompt: assistant.systemPrompt || '',
-            resumeContent: assistant.resumeContent || '',
-            technologies: assistant.technologies || ''
+            systemPrompt: created.systemPrompt || '',
+            resumeContent: created.resumeContent || '',
+            technologies: created.technologies || ''
           })
         });
 
         if (response.ok) {
           const backendData = await response.json();
-          console.log('[settings] Synced assistant to backend:', backendData.id);
-        } else {
-          console.warn('[settings] Failed to sync to backend:', response.status);
+          console.log('[settings] Synced new assistant to backend:', backendData.id);
+          // Update local store with backend ID if needed? No, we use local IDs as master.
         }
       } catch (err) {
         console.warn('[settings] Backend sync error:', err.message);
@@ -278,26 +277,43 @@ function registerSettingsHandlers({ ipcMain, windowManager, store, app }) {
         return { success: false, error: 'Assistant not found' };
       }
 
-      const assistant = updated; // For sync logic
-      // Sync to Backend (Attempt) - We should actually UPDATE backend too, but POST is simpler to "upsert" or just ensure it exists
-      // Backend doesn't support PUT /api/topics/:id effectively yet (it operates on memory/json list). 
-      // We'll re-sync as new for now or rely on session start to pick it up? 
-      // Actually, server.js doesn't have an update endpoint. The Prompt is sent in `handleQuestion` via `assistants`.
-      // `server.js` loads `assistants.json`.
-      // We can't easily sync updates to the backend without adding a PUT endpoint.
-      // BUT, since we have `localAssistantStore` in server (wait, no server has its own store), we need to sync.
-      // For now, let's create a new one on backend or assume user creates new.
-      // Wait, fixing backend sync for updates is important but out of scope for "Resume Fix".
-      // ... I'll leave backend update out for now to minimize risk, relying on creation sync.
-      // Actually, if I don't sync update, editing the prompt won't work!
-      // I'll try to re-POST with same name? Backend makes new ID.
-      // Okay, I will just persist content locally. The session usage logic needs to send the prompt...
-      // CHECK: `server.js` `handleQuestion` uses `assistantId` to look up in `assistants` array.
-      // If we update local, we MUST update backend store.
-      // I'll add a quick "Add" call which might duplicate but ensures the latest data is available somewhere?
-      // No, that's messy.
-      // Let's assume for now the user mainly cares about *Creating* with resume.
-      // I will handle the local file processing which is the main user request.
+      // Sync to Backend (Update)
+      try {
+        // Backend uses its own IDs, but we can try to find by Name or just sync the content
+        // For simplicity, we assume the backend store and frontend store IDs might differ if not synced perfectly.
+        // However, the current backend implementation uses `id` as key.
+        // We'll try to sync using the local ID.
+        const syncId = updated.id || assistantId;
+        const response = await fetch(`http://127.0.0.1:3000/api/topics/${syncId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: updated.name,
+            systemPrompt: updated.systemPrompt,
+            resumeContent: updated.resumeContent,
+            technologies: updated.technologies
+          })
+        });
+
+        if (response.ok) {
+          console.log('[settings] Synced assistant update to backend');
+        } else if (response.status === 404) {
+          // If 404, maybe it doesn't exist on backend yet? Create it.
+          await fetch('http://127.0.0.1:3000/api/topics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: syncId,
+              name: updated.name,
+              systemPrompt: updated.systemPrompt,
+              resumeContent: updated.resumeContent,
+              technologies: updated.technologies
+            })
+          });
+        }
+      } catch (err) {
+        console.warn('[settings] Backend update sync failed:', err.message);
+      }
 
       BrowserWindow.getAllWindows().forEach((window) => {
         window.webContents.send('assistant-updated');

@@ -1,28 +1,49 @@
+const { BrowserWindow } = require('electron');
+
 const GLOBAL_SHORTCUT_QUICK_QUESTION = 'CommandOrControl+Enter';
+const GLOBAL_SHORTCUT_SCREENSHOT = 'CommandOrControl+Shift+S';
 
 function registerGlobalShortcuts({ globalShortcut, sessionService }) {
   try {
-    if (globalShortcut.isRegistered(GLOBAL_SHORTCUT_QUICK_QUESTION)) {
-      console.log(`Global shortcut already registered: ${GLOBAL_SHORTCUT_QUICK_QUESTION}`);
-      return;
+    if (!globalShortcut.isRegistered(GLOBAL_SHORTCUT_QUICK_QUESTION)) {
+      const success = globalShortcut.register(GLOBAL_SHORTCUT_QUICK_QUESTION, () => {
+        if (!sessionService.isActive) {
+          console.log('Global shortcut ignored: session is not active');
+          return;
+        }
+
+        const sent = sessionService.sendToBackend('question', {});
+        if (!sent) {
+          console.error('Failed to send question event via global shortcut');
+        }
+      });
+
+      if (success) {
+        console.log(`Global shortcut registered: ${GLOBAL_SHORTCUT_QUICK_QUESTION}`);
+      } else {
+        console.error(`Failed to register global shortcut: ${GLOBAL_SHORTCUT_QUICK_QUESTION}`);
+      }
     }
 
-    const success = globalShortcut.register(GLOBAL_SHORTCUT_QUICK_QUESTION, () => {
-      if (!sessionService.isActive) {
-        console.log('Global shortcut ignored: session is not active');
-        return;
-      }
+    if (!globalShortcut.isRegistered(GLOBAL_SHORTCUT_SCREENSHOT)) {
+      const success = globalShortcut.register(GLOBAL_SHORTCUT_SCREENSHOT, () => {
+        if (!sessionService.isActive) {
+          console.log('Screenshot shortcut ignored: session is not active');
+          return;
+        }
 
-      const sent = sessionService.sendToBackend('question', {});
-      if (!sent) {
-        console.error('Failed to send question event via global shortcut');
-      }
-    });
+        BrowserWindow.getAllWindows().forEach((window) => {
+          if (!window.isDestroyed()) {
+            window.webContents.send('trigger-screenshot-capture');
+          }
+        });
+      });
 
-    if (success) {
-      console.log(`Global shortcut registered: ${GLOBAL_SHORTCUT_QUICK_QUESTION}`);
-    } else {
-      console.error(`Failed to register global shortcut: ${GLOBAL_SHORTCUT_QUICK_QUESTION}`);
+      if (success) {
+        console.log(`Global shortcut registered: ${GLOBAL_SHORTCUT_SCREENSHOT}`);
+      } else {
+        console.error(`Failed to register global shortcut: ${GLOBAL_SHORTCUT_SCREENSHOT}`);
+      }
     }
   } catch (error) {
     console.error('Error registering global shortcuts:', error);
@@ -36,7 +57,6 @@ function unregisterGlobalShortcuts({ globalShortcut } = {}) {
       return;
     }
 
-    globalShortcut.unregister(GLOBAL_SHORTCUT_QUICK_QUESTION);
     globalShortcut.unregisterAll();
     console.log('Global shortcuts unregistered');
   } catch (error) {
@@ -47,6 +67,6 @@ function unregisterGlobalShortcuts({ globalShortcut } = {}) {
 module.exports = {
   registerGlobalShortcuts,
   unregisterGlobalShortcuts,
-  GLOBAL_SHORTCUT_QUICK_QUESTION
+  GLOBAL_SHORTCUT_QUICK_QUESTION,
+  GLOBAL_SHORTCUT_SCREENSHOT
 };
-

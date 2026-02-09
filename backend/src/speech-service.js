@@ -1,9 +1,9 @@
 /**
  * Speech Service - Multi-provider STT abstraction layer
- * 
+ *
  * Provides a unified interface for speech-to-text with automatic fallback:
  * - Primary: Web Speech API (free, browser-based)
- * - Fallback: Deepgram (low-cost, high accuracy)
+ * - Fallback: Cloud STT provider (paid, high accuracy)
  */
 
 const EventEmitter = require('events');

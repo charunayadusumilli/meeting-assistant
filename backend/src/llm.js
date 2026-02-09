@@ -1,10 +1,10 @@
 /**
- * LLM Integration - Gemini API with Real-Time Streaming
- * 
+ * LLM Integration - Multi-Provider Streaming
+ *
  * Providers:
- * - gemini: Google Gemini API (FREE - 1000 requests/day) with token streaming
+ * - gemini: Cloud LLM with token streaming
  * - ollama: Local Ollama (requires local install)
- * - fallback: Hash-based embedding (no AI)
+ * - fallback: Hash-based embedding (no external service)
  */
 
 const DEFAULT_PROVIDER = process.env.LLM_PROVIDER || 'gemini';
@@ -12,6 +12,10 @@ const BASE_URL = process.env.LLM_BASE_URL || 'http://localhost:11434';
 const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.0-flash';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini';
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -60,7 +64,10 @@ async function embedText(text) {
     if (DEFAULT_PROVIDER === 'ollama') {
       return await ollamaEmbed(text);
     }
-    // For Gemini, use hash embedding (Gemini embedding API is separate)
+    if (DEFAULT_PROVIDER === 'openai' && OPENAI_API_KEY) {
+      return await openaiEmbed(text);
+    }
+    // Cloud provider uses separate embedding API, use hash fallback
     return hashEmbedding(text);
   } catch (error) {
     console.warn('[llm] Falling back to hash embedding:', error.message);
@@ -69,12 +76,7 @@ async function embedText(text) {
 }
 
 /**
- * Gemini API with REAL-TIME token streaming
- * Uses Server-Sent Events (SSE) for token-by-token output
- */
-/**
- * Gemini API with REAL-TIME token streaming
- * Uses Server-Sent Events (SSE) for token-by-token output
+ * Streaming LLM API call via SSE
  */
 async function geminiStreamAPI(prompt, images = [], onToken) {
   if (!GEMINI_API_KEY) {
@@ -160,7 +162,7 @@ async function geminiStreamAPI(prompt, images = [], onToken) {
 }
 
 /**
- * Gemini API without streaming (fallback)
+ * Non-streaming LLM API call (fallback)
  */
 async function geminiAPI(prompt, images = [], onToken) {
   if (!GEMINI_API_KEY) {
@@ -252,6 +254,117 @@ async function ollamaStream(prompt, onToken) {
 }
 
 /**
+ * OpenAI-compatible streaming (works with OpenAI, Groq, OpenRouter, LM Studio, vLLM)
+ */
+async function openaiCompatibleStream(prompt, images = [], onToken) {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY not set');
+  }
+
+  const url = `${OPENAI_BASE_URL}/chat/completions`;
+
+  console.log(`[llm] Streaming from OpenAI-compatible API (${OPENAI_MODEL})...`);
+
+  const messages = [];
+  if (images && images.length > 0) {
+    const content = [
+      { type: 'text', text: prompt },
+      ...images.map(img => ({
+        type: 'image_url',
+        image_url: { url: `data:${img.mimeType || 'image/jpeg'};base64,${img.data}` }
+      }))
+    ];
+    messages.push({ role: 'user', content });
+  } else {
+    messages.push({ role: 'user', content: prompt });
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages,
+      stream: true,
+      temperature: 0.7,
+      max_tokens: 2048
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI API failed: ${response.status} - ${errorText}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr || jsonStr === '[DONE]') continue;
+
+        try {
+          const data = JSON.parse(jsonStr);
+          const text = data.choices?.[0]?.delta?.content;
+
+          if (text) {
+            fullText += text;
+            onToken(text);
+          }
+        } catch (parseError) {
+          console.warn('[llm] Parse error:', parseError.message);
+        }
+      }
+    }
+  }
+
+  return fullText;
+}
+
+/**
+ * OpenAI-compatible embeddings
+ */
+async function openaiEmbed(text) {
+  if (!OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY not set for embeddings');
+  }
+
+  const url = `${OPENAI_BASE_URL}/embeddings`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small',
+      input: text
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenAI embeddings failed: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return payload.data?.[0]?.embedding || hashEmbedding(text);
+}
+
+/**
  * Stream completion from configured provider
  * Supports real-time token-by-token streaming
  */
@@ -279,8 +392,11 @@ async function streamCompletion(prompt, images = [], onToken) {
         return;
 
       case 'ollama':
-        // TODO: Support images for Ollama (LLaVA) if needed
         await ollamaStream(prompt, onToken);
+        return;
+
+      case 'openai':
+        await openaiCompatibleStream(prompt, images, onToken);
         return;
 
       default:

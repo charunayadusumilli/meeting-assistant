@@ -26,7 +26,74 @@ const { authService } = require('./services/auth-service');
 const { apiService } = require('./services/api-service');
 
 const path = require('path');
+const { fork } = require('child_process');
+
 app.setAppUserModelId('MeetingAssistant');
+
+let backendProcess = null;
+
+function startBackend() {
+  return new Promise((resolve) => {
+    const serverPath = path.resolve(__dirname, '..', '..', 'backend', 'src', 'server.js');
+    console.log('[Backend] Starting:', serverPath);
+
+    backendProcess = fork(serverPath, [], {
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'production' }
+    });
+
+    backendProcess.stdout.on('data', (data) => {
+      console.log(`[Backend] ${data.toString().trimEnd()}`);
+    });
+
+    backendProcess.stderr.on('data', (data) => {
+      console.error(`[Backend] ${data.toString().trimEnd()}`);
+    });
+
+    backendProcess.on('error', (err) => {
+      console.error('[Backend] Failed to start:', err.message);
+      backendProcess = null;
+      resolve();
+    });
+
+    backendProcess.on('exit', (code) => {
+      console.log(`[Backend] Exited with code ${code}`);
+      backendProcess = null;
+    });
+
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
+    let attempts = 0;
+    const maxAttempts = 20;
+    const pollInterval = 500;
+
+    const poll = setInterval(() => {
+      attempts++;
+      fetch(`${backendUrl}/health`)
+        .then((res) => {
+          if (res.ok) {
+            clearInterval(poll);
+            console.log(`[Backend] Ready after ${attempts * pollInterval}ms`);
+            resolve();
+          }
+        })
+        .catch(() => {
+          if (attempts >= maxAttempts) {
+            clearInterval(poll);
+            console.warn(`[Backend] Health check timed out after ${maxAttempts * pollInterval}ms, continuing anyway`);
+            resolve();
+          }
+        });
+    }, pollInterval);
+  });
+}
+
+function stopBackend() {
+  if (backendProcess) {
+    console.log('[Backend] Stopping...');
+    backendProcess.kill('SIGTERM');
+    backendProcess = null;
+  }
+}
 
 const { config, store } = bootstrapApp(path.resolve(__dirname));
 
@@ -97,6 +164,15 @@ if (!gotTheLock) {
       allWindows.forEach((window) => {
         window.webContents.send('auth-error', error);
       });
+    },
+
+    sessionTranscript: (data) => {
+      const allWindows = BrowserWindow.getAllWindows();
+      allWindows.forEach((window) => {
+        if (!window.isDestroyed()) {
+          window.webContents.send('session-transcript', data);
+        }
+      });
     }
   };
 
@@ -104,6 +180,7 @@ if (!gotTheLock) {
   sessionService.on('response_start', serviceListeners.sessionResponseStart);
   sessionService.on('response_end', serviceListeners.sessionResponseEnd);
   sessionService.on('clear', serviceListeners.sessionClear);
+  sessionService.on('transcript', serviceListeners.sessionTranscript);
   authService.on('authenticated', serviceListeners.authAuthenticated);
   authService.on('logged-out', serviceListeners.authLoggedOut);
   authService.on('auth-error', serviceListeners.authError);
@@ -158,7 +235,10 @@ if (!gotTheLock) {
     });
   }
 
-  app.whenReady().then(() => {
+  app.on('before-quit', () => stopBackend());
+
+  app.whenReady().then(async () => {
+    await startBackend();
     createAppMainWindow();
 
     if (config.auth?.disabled) {
@@ -283,6 +363,16 @@ if (!gotTheLock) {
       ipcMain,
       apiService
     });
+
+    ipcMain.on('client-log', (event, data) => {
+      console.log(`[RendererLog][${event.sender.getTitle() || 'Unknown'}]`, data);
+      // Forward to backend for server-side logging
+      fetch('http://localhost:3000/api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: 'info', msg: `Renderer[${event.sender.getTitle()}]`, data })
+      }).catch(() => { });
+    });
   });
 }
 
@@ -297,4 +387,3 @@ process.on('unhandledRejection', (reason, promise) => {
   log.error('Unhandled Promise Rejection:', reason);
   log.error('Promise:', promise);
 });
-

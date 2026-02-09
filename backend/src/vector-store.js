@@ -154,6 +154,12 @@ function createVectorStore(storageDir, options = {}) {
     });
   }
 
+  const vectorBackend = (options.vectorBackend || process.env.VECTOR_BACKEND || 'json').toLowerCase();
+  if (vectorBackend === 'sqlite') {
+    const { createSqliteVectorStore } = require('./sqlite-store');
+    return createSqliteVectorStore(storageDir);
+  }
+
   return createLocalVectorStore(storageDir);
 }
 

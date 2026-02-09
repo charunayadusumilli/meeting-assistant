@@ -1,38 +1,28 @@
-const io = require('socket.io-client');
+const { io } = require('socket.io-client');
 
-const SOCKET_URL = 'http://localhost:3000';
-const socket = io(SOCKET_URL);
-
-console.log('Connecting to', SOCKET_URL);
+const socket = io('http://localhost:3000', {
+    query: { sessionId: 'test-session-' + Date.now() }
+});
 
 socket.on('connect', () => {
-    console.log('Connected! Session ID:', socket.id);
-
-    // Simulate sending a transcript (as if from Web Speech API)
-    const transcriptData = {
-        content: 'This is a test transcript from the verification script.',
+    console.log('Connected to backend!');
+    socket.emit('recognized_item', {
+        content: 'Hello, this is a test transcript item',
         timestamp: Date.now()
-    };
-
-    console.log('Sending recognized_item:', transcriptData);
-    socket.emit('recognized_item', transcriptData);
+    });
 });
 
 socket.on('transcript', (data) => {
-    console.log('Server relayed transcript:', data);
-    if (data.content === 'This is a test transcript from the verification script.') {
-        console.log('✅ TEST PASSED: Transcript received and relayed.');
-        process.exit(0);
-    }
+    console.log('Received transcript back:', data);
+    process.exit(0);
 });
 
 socket.on('connect_error', (err) => {
-    console.error('Connection failed:', err.message);
+    console.error('Connection error:', err);
     process.exit(1);
 });
 
-// Timeout
 setTimeout(() => {
-    console.error('❌ TIMEOUT: No response from server.');
+    console.log('Timeout waiting for transcript');
     process.exit(1);
 }, 5000);

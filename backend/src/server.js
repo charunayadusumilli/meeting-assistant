@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -19,6 +20,11 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+app.post('/api/log', (req, res) => {
+  console.log('[remote-log]', req.body);
+  res.sendStatus(200);
+});
+
 const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 const TOP_K = Number(process.env.TOP_K || 5);
@@ -26,6 +32,9 @@ const RERANK_WEIGHT = Number(process.env.RERANK_WEIGHT || 0.25);
 const CHUNK_SIZE = Number(process.env.CHUNK_SIZE || 800);
 const CHUNK_OVERLAP = Number(process.env.CHUNK_OVERLAP || 120);
 const TRANSCRIPT_SCAN_INTERVAL = Number(process.env.TRANSCRIPT_SCAN_INTERVAL || 30000);
+const AUTO_DETECT_COOLDOWN_MS = Number(process.env.AUTO_DETECT_COOLDOWN || 15000);
+const AUTO_DETECT_CONTEXT_LINES = 20;
+const AUTO_DETECT_MIN_WORDS = 5;
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
@@ -70,6 +79,7 @@ function persistIngested() {
 
 const vectorStore = createVectorStore(STORAGE_DIR);
 const sessionBuffers = new Map();
+const autoDetectState = new Map();
 let lastTranscriptScan = null;
 let lastTranscriptScanCount = 0;
 
@@ -80,12 +90,78 @@ function extractTranscriptText(data) {
   if (typeof data.displayText === 'string') return data.displayText;
   if (typeof data.transcript === 'string') return data.transcript;
   if (typeof data.utterance === 'string') return data.utterance;
+  if (typeof data.content === 'string') return data.content;
   const alt = data.alternatives && data.alternatives[0];
   if (alt && typeof alt.transcript === 'string') return alt.transcript;
   const best = data.nBest && data.nBest[0];
   if (best && typeof best.display === 'string') return best.display;
   if (best && typeof best.lexical === 'string') return best.lexical;
   return '';
+}
+
+function isQuestion(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return { isQuestion: false, type: null };
+
+  const hasQuestionMark = trimmed.endsWith('?');
+  const questionWordPattern = /^(what|how|why|when|where|who|which|can you|could you|would you|will you|do you|does|did|is it|are there|have you|has anyone|should|shall|tell me|explain|describe|walk me through)\b/i;
+  const codingTaskPattern = /\b(write a|implement|create a|build a|design a|code a|fix the|debug|refactor|optimize|solve|find the bug|what's wrong|what is wrong|correct this|modify|update the|add a|remove the)\b/i;
+
+  const startsWithQuestionWord = questionWordPattern.test(trimmed);
+  const isCodingTask = codingTaskPattern.test(trimmed);
+
+  const detected = hasQuestionMark || startsWithQuestionWord || isCodingTask;
+  return {
+    isQuestion: detected,
+    type: isCodingTask ? 'coding' : (detected ? 'question' : null)
+  };
+}
+
+async function detectAndAutoAnswer(socket, sessionId, text) {
+  const state = autoDetectState.get(sessionId);
+  if (!state || !state.enabled) return;
+
+  const now = Date.now();
+  if (state.lastTriggeredAt && (now - state.lastTriggeredAt) < AUTO_DETECT_COOLDOWN_MS) return;
+
+  const wordCount = text.trim().split(/\s+/).length;
+  if (wordCount < AUTO_DETECT_MIN_WORDS) return;
+
+  const detection = isQuestion(text);
+  if (!detection.isQuestion) return;
+
+  state.lastTriggeredAt = now;
+  autoDetectState.set(sessionId, state);
+
+  console.log(`[auto-detect] Detected (${detection.type}) in session ${sessionId}: "${text.substring(0, 80)}"`);
+
+  if (detection.type === 'coding') {
+    socket.emit('auto-capture-screenshot', {
+      reason: 'Coding question detected',
+      detectedQuestion: text
+    });
+    return;
+  }
+
+  socket.emit('auto-answer-start', { detectedQuestion: text, type: detection.type });
+
+  const buffer = sessionBuffers.get(sessionId);
+  const recentLines = buffer ? buffer.lines.slice(-AUTO_DETECT_CONTEXT_LINES) : [];
+  const transcriptContext = recentLines.join('\n');
+
+  const contextualQuestion = transcriptContext
+    ? `[RECENT CONVERSATION]\n${transcriptContext}\n\n[DETECTED QUESTION]\n${text}`
+    : text;
+
+  await handleQuestion(socket, {
+    question: contextualQuestion,
+    sessionId,
+    assistantId: state.assistantId || 'assistant-general',
+    _autoDetected: true,
+    _detectionType: detection.type
+  });
+
+  socket.emit('auto-answer-end', { detectedQuestion: text });
 }
 
 function splitIntoChunks(text, size, overlap) {
@@ -282,6 +358,26 @@ app.post('/api/topics', (req, res) => {
   res.json(assistant);
 });
 
+app.put('/api/topics/:id', (req, res) => {
+  const { id } = req.params;
+  const index = assistants.findIndex(a => a.id === id);
+  if (index < 0) {
+    return res.status(404).json({ error: 'Assistant not found' });
+  }
+
+  const current = assistants[index];
+  const updated = {
+    ...current,
+    ...req.body,
+    id: current.id, // Immutable
+    updatedAt: new Date().toISOString()
+  };
+
+  assistants[index] = updated;
+  saveJson(assistantsPath, assistants);
+  res.json(updated);
+});
+
 app.post('/api/sessions', (req, res) => {
   const id = uuidv4();
   res.json({ _id: id, id, sessionId: id, status: 'created' });
@@ -459,6 +555,7 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
 async function handleQuestion(socket, data) {
+  console.log(`[server] Handling question from socket ${socket.id}:`, data?.content || data?.question || '(no text)');
   const requestId = data?.requestId ?? null;
   const question = data?.content || data?.message || data?.question || '';
   const assistantId = data?.assistantId || data?.huddleId || data?.topicId || 'assistant-general';
@@ -512,13 +609,43 @@ async function handleQuestion(socket, data) {
     const context = ranked.slice(0, TOP_K).map((item, idx) => `[${idx + 1}] ${item.text}`).join('\n');
     const assistant = assistants.find((item) => item.id === assistantId) || assistants[0];
 
+    // Recent transcript context
+    const sessionId = data?.sessionId || socket.handshake?.query?.sessionId;
+    const buffer = sessionBuffers.get(sessionId);
+    const recentTranscript = buffer ? buffer.lines.slice(-AUTO_DETECT_CONTEXT_LINES).join('\n') : '';
+
+    // Code-aware instructions when images are present
+    let codeInstructions = '';
+    if (images.length > 0) {
+      const technologies = assistant?.technologies || '';
+      codeInstructions = [
+        '[CODE ANALYSIS INSTRUCTIONS]',
+        'Screenshots have been provided. Analyze any visible code, errors, or UI elements.',
+        technologies ? `Expected technologies: ${technologies}` : '',
+        '1. Identify the programming language and framework visible in the screenshot',
+        '2. Quote the specific code or error message you see',
+        '3. Provide corrected code in markdown code blocks with the appropriate language tag',
+        '4. If you see a terminal/console, analyze the error output',
+        '5. Be specific about line numbers or code locations when visible',
+        '[END CODE INSTRUCTIONS]'
+      ].filter(Boolean).join('\n');
+    }
+
+    // Auto-detect note
+    const autoDetectNote = data?._autoDetected
+      ? '[AUTO-DETECTED] This question was automatically detected from the conversation. Focus on the most recent question or request.\n'
+      : '';
+
     const promptParts = [
       assistant?.systemPrompt || 'You are Meeting Assistant, a concise and helpful meeting copilot.',
+      autoDetectNote,
       assistant?.resumeContent ? `[RESUME CONTEXT START]\n${assistant.resumeContent}\n[RESUME CONTEXT END]` : '',
-      context ? `Context:\n${context}` : 'Context: (none)',
+      recentTranscript ? `[RECENT CONVERSATION]\n${recentTranscript}` : '',
+      codeInstructions,
+      context ? `[RAG CONTEXT]\n${context}` : '',
       `User: ${question}`,
       'Assistant:'
-    ];
+    ].filter(Boolean);
 
     const prompt = promptParts.join('\n\n');
 
@@ -534,17 +661,28 @@ async function handleQuestion(socket, data) {
 
 io.on('connection', (socket) => {
   const sessionId = socket.handshake.query?.sessionId || uuidv4();
+  console.log(`[server] New connection: ${socket.id} (Session: ${sessionId})`);
   sessionBuffers.set(sessionId, { lines: [], startedAt: new Date().toISOString() });
+  autoDetectState.set(sessionId, {
+    lastTriggeredAt: null,
+    enabled: process.env.AUTO_DETECT_ENABLED !== 'false',
+    assistantId: socket.handshake.query?.assistantId || 'assistant-general'
+  });
   socket.emit('session-update', { sessionId, status: 'connected' });
 
-  socket.on('question', (data) => handleQuestion(socket, data));
-  socket.on('message', (data) => handleQuestion(socket, data));
+  socket.on('question', (data) => handleQuestion(socket, { ...data, sessionId }));
+  socket.on('message', (data) => handleQuestion(socket, { ...data, sessionId }));
 
   socket.on('recognized_item', (data) => {
+    console.log(`[server] recognized_item from ${socket.id}:`, data?.content || data?.text);
     const text = extractTranscriptText(data);
     if (text) {
       const buffer = sessionBuffers.get(sessionId);
       if (buffer) buffer.lines.push(text);
+
+      detectAndAutoAnswer(socket, sessionId, text).catch(err => {
+        console.warn('[auto-detect] Error:', err.message);
+      });
     }
     socket.emit('transcript', { ...data, sessionId });
   });
@@ -553,7 +691,25 @@ io.on('connection', (socket) => {
     socket.emit('transcript', { ...data, sessionId });
   });
 
+  socket.on('client_log', (data) => {
+    console.log(`[client-log][${socket.id}]`, data);
+  });
+
+  socket.on('client_error', (data) => {
+    console.error(`[client-error][${socket.id}]`, data);
+  });
+
+  socket.on('toggle-auto-detect', (data) => {
+    const state = autoDetectState.get(sessionId) || {};
+    state.enabled = data?.enabled ?? !state.enabled;
+    if (data?.assistantId) state.assistantId = data.assistantId;
+    autoDetectState.set(sessionId, state);
+    socket.emit('auto-detect-status', { enabled: state.enabled });
+    console.log(`[auto-detect] ${state.enabled ? 'Enabled' : 'Disabled'} for session ${sessionId}`);
+  });
+
   socket.on('disconnect', () => {
+    autoDetectState.delete(sessionId);
     void finalizeSessionTranscript(sessionId);
   });
 

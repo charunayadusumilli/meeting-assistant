@@ -6,13 +6,13 @@ const fs = require('fs');
 function loadConfig(rootDir) {
   console.log(rootDir);
   let config = {
-    apiUrl: 'http://localhost:3000',
-    createAssistantUrl: 'http://localhost:3000/assistants/new',
+    apiUrl: 'http://127.0.0.1:3000',
+    createAssistantUrl: 'http://127.0.0.1:3000/assistants/new',
     auth: {
       disabled: true,
-      authUrl: 'http://localhost:3000/api/oauth/authorize',
-      tokenUrl: 'http://localhost:3000/api/oauth/token',
-      revokeUrl: 'http://localhost:3000/api/oauth/revoke',
+      authUrl: 'http://127.0.0.1:3000/api/oauth/authorize',
+      tokenUrl: 'http://127.0.0.1:3000/api/oauth/token',
+      revokeUrl: 'http://127.0.0.1:3000/api/oauth/revoke',
       clientId: 'local-dev',
       clientSecret: 'local-dev',
       scope: 'openid profile email'
@@ -23,7 +23,7 @@ function loadConfig(rootDir) {
       topOffset: 200
     },
     backend: {
-      websocketUrl: 'http://localhost:3000'
+      websocketUrl: 'http://127.0.0.1:3000'
     },
     speech: {
       microsoft: {

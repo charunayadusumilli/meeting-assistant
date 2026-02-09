@@ -1,6 +1,6 @@
 /**
- * SessionService - Pulse Architecture Implementation
- * Connects Electron Main Process to Backend (http://localhost:3000)
+ * SessionService - Main Process to Backend Bridge
+ * Manages Socket.IO connection between Electron and the backend server
  */
 const { io } = require('socket.io-client');
 const { EventEmitter } = require('events');
@@ -101,6 +101,28 @@ class SessionService extends EventEmitter {
       content: message
     });
     return true;
+  }
+
+  sendToBackend(event, data) {
+    if (!this.socket?.connected) return false;
+    this.socket.emit(event, { sessionId: this.sessionId, ...data });
+    return true;
+  }
+
+  async cleanup() {
+    this.isActive = false;
+    if (this.socket?.connected) {
+      this.socket.emit('stop_session', { sessionId: this.sessionId });
+    }
+    this.sessionId = null;
+  }
+
+  getSessionStatus() {
+    return {
+      isActive: this.isActive,
+      sessionId: this.sessionId,
+      backendConnected: this.socket?.connected || false
+    };
   }
 }
 

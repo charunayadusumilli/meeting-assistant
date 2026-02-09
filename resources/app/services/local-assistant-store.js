@@ -74,14 +74,11 @@ class LocalAssistantStore {
     this.store.set('assistants', list);
   }
 
-  create({ name, role, description } = {}) {
+  create(data = {}) {
     const now = Date.now();
     const assistant = {
+      ...data,
       _id: makeId(),
-      id: null,
-      name: name || 'New Assistant',
-      role: role || '',
-      description: description || '',
       createdAt: now,
       updatedAt: now
     };

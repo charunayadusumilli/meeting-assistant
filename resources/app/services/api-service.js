@@ -35,7 +35,7 @@ class ApiService {
     return assistant;
   }
 
-  async createSession(huddleId, options = {}) {
+  async createSession(huddleId) {
     if (!huddleId) {
       throw new Error('huddleId is required to create a session');
     }
@@ -47,8 +47,7 @@ class ApiService {
       sessionId,
       huddleId,
       createdAt: Date.now(),
-      status: 'ready',
-      ...options
+      status: 'ready'
     };
   }
 
