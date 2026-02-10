@@ -101,6 +101,11 @@ function registerGeneralHandlers({
       throw new Error('Speech token did not include a region');
     }
 
+    // Reject placeholder credentials — 'local' is not a real Azure region
+    if (region === 'local' || tokenInfo.token === 'local-dev-token') {
+      throw new Error('Azure Speech not configured (placeholder credentials)');
+    }
+
     return {
       region,
       mode: 'token',
@@ -111,8 +116,13 @@ function registerGeneralHandlers({
   };
 
   ipcMain.handle('get-speech-config', async () => {
-    console.log('Providing token-based speech config to renderer');
-    return getSpeechTokenPayload();
+    try {
+      console.log('Providing token-based speech config to renderer');
+      return await getSpeechTokenPayload();
+    } catch (err) {
+      console.warn('[get-speech-config] Azure unavailable, using Web Speech API:', err.message);
+      return { mode: 'webspeech', region: '' };
+    }
   });
 
   ipcMain.handle('get-create-assistant-url', async () => {

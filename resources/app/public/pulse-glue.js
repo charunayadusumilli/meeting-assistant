@@ -1,10 +1,30 @@
 /**
  * UI Integration Layer
  * Connects the frontend to speech and backend services
+ *
+ * Bridges Web Speech API transcripts into the React bundle's SpeechService
+ * so the UI displays them natively.
  */
 
 const { SpeechManager } = require('../services/speech-manager');
 const { ipcRenderer } = require('electron');
+const EventEmitter = require('events').EventEmitter;
+
+// Intercept EventEmitter to capture the bundle's SpeechService singleton.
+// pulse-glue.js loads before bundle.js (both deferred), so this intercept
+// runs before the React bundle registers listeners on SpeechService.
+const _origOn = EventEmitter.prototype.on;
+EventEmitter.prototype.on = function (event, listener) {
+  if (event === 'recognized' && !window.__bundleSpeechService) {
+    if ('recognizer' in this && 'speechConfig' in this) {
+      window.__bundleSpeechService = this;
+      console.log('[Pulse] Captured bundle SpeechService singleton');
+    }
+  }
+  return _origOn.call(this, event, listener);
+};
+// Restore original after bundle has loaded
+setTimeout(() => { EventEmitter.prototype.on = _origOn; }, 10000);
 
 const speechManager = new SpeechManager({
   backendUrl: 'http://localhost:3000',
@@ -67,15 +87,42 @@ const remoteError = (msg, error = null) => {
     speechManager.onTranscript((text) => {
       console.log('[Pulse] Final Transcript:', text);
       window.dispatchEvent(new CustomEvent('pulse-transcript', { detail: { text, isFinal: true } }));
+      // Bridge into bundle's SpeechService so React UI renders natively
+      const svc = window.__bundleSpeechService;
+      if (svc) {
+        svc.emit('recognized', {
+          type: 'final',
+          content: text,
+          timestamp: Date.now(),
+          displayTimestamp: new Date().toLocaleTimeString()
+        });
+      }
     });
 
     speechManager.onInterim((text) => {
       console.log('[Pulse] Interim:', text);
       window.dispatchEvent(new CustomEvent('pulse-transcript', { detail: { text, isFinal: false } }));
+      const svc = window.__bundleSpeechService;
+      if (svc) {
+        svc.emit('recognizing', {
+          type: 'interim',
+          content: text,
+          timestamp: Date.now(),
+          displayTimestamp: new Date().toLocaleTimeString()
+        });
+      }
     });
 
     speechManager.onStatusChange((status) => {
       remoteLog('Status Change:', status);
+      // When Web Speech starts listening, signal the bundle's SpeechService
+      if (status === 'listening') {
+        const svc = window.__bundleSpeechService;
+        if (svc) {
+          svc.emit('ready');
+          svc.emit('sessionStarted', { timestamp: Date.now() });
+        }
+      }
     });
 
     speechManager.onError((err) => {
