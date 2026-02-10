@@ -28,7 +28,7 @@ setTimeout(() => { EventEmitter.prototype.on = _origOn; }, 10000);
 
 const speechManager = new SpeechManager({
   backendUrl: 'http://localhost:3000',
-  preferDeepgram: false,
+  preferDeepgram: true,
   autoFallback: true
 });
 

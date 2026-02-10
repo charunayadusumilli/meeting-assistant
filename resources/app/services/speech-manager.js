@@ -111,7 +111,19 @@ class SpeechManager {
       });
 
       this.socket.on('deepgram_ready', () => {
+        console.log('[SpeechManager] Deepgram ready, starting audio stream');
         this._startAudioStreaming();
+      });
+
+      // Listen for transcripts from backend (Deepgram STT results)
+      this.socket.on('transcript', (data) => {
+        const text = data.text || data.content;
+        if (!text) return;
+        if (data.isFinal || data.type === 'final') {
+          if (this.callbacks.onTranscript) this.callbacks.onTranscript(text);
+        } else {
+          if (this.callbacks.onInterim) this.callbacks.onInterim(text);
+        }
       });
 
       this.socket.on('answer', (data) => {
