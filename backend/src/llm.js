@@ -17,6 +17,10 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || process.env.LLM_MODEL || 'gpt-4o-mini';
 
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
+const ANTHROPIC_API_BASE = 'https://api.anthropic.com/v1';
+
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 /**
@@ -67,7 +71,8 @@ async function embedText(text) {
     if (DEFAULT_PROVIDER === 'openai' && OPENAI_API_KEY) {
       return await openaiEmbed(text);
     }
-    // Cloud provider uses separate embedding API, use hash fallback
+    // Anthropic and Gemini don't have native embeddings API
+    // Fall back to hash-based embedding (local, fast, deterministic)
     return hashEmbedding(text);
   } catch (error) {
     console.warn('[llm] Falling back to hash embedding:', error.message);
@@ -365,6 +370,100 @@ async function openaiEmbed(text) {
 }
 
 /**
+ * Anthropic Claude streaming completion
+ */
+async function anthropicStream(prompt, images = [], onToken) {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY not set. Get one at https://console.anthropic.com/');
+  }
+
+  const url = `${ANTHROPIC_API_BASE}/messages`;
+
+  console.log(`[llm] Streaming from Anthropic API (${ANTHROPIC_MODEL}) with ${images.length} images...`);
+
+  const content = [];
+
+  // Add images first if any
+  if (images && images.length > 0) {
+    images.forEach(img => {
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: img.mimeType || 'image/jpeg',
+          data: img.data
+        }
+      });
+    });
+  }
+
+  // Add text prompt
+  content.push({
+    type: 'text',
+    text: prompt
+  });
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      messages: [{ role: 'user', content }],
+      stream: true,
+      max_tokens: 4096,
+      temperature: 0.7
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic API failed: ${response.status} - ${errorText}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr || jsonStr === '[DONE]') continue;
+
+        try {
+          const data = JSON.parse(jsonStr);
+
+          // Anthropic sends different event types
+          if (data.type === 'content_block_delta' && data.delta?.type === 'text_delta') {
+            const text = data.delta.text;
+            if (text) {
+              fullText += text;
+              onToken(text);
+            }
+          }
+        } catch (parseError) {
+          console.warn('[llm] Parse error:', parseError.message);
+        }
+      }
+    }
+  }
+
+  return fullText;
+}
+
+/**
  * Stream completion from configured provider
  * Supports real-time token-by-token streaming
  */
@@ -381,6 +480,11 @@ async function streamCompletion(prompt, images = [], onToken) {
 
   try {
     switch (provider) {
+      case 'anthropic':
+      case 'claude':
+        await anthropicStream(prompt, images, onToken);
+        return;
+
       case 'gemini':
         // Use streaming API for real-time output
         try {
@@ -406,7 +510,7 @@ async function streamCompletion(prompt, images = [], onToken) {
     }
   } catch (error) {
     console.error('[llm] All providers failed:', error.message);
-    onToken(`Error: ${error.message}. Please set GEMINI_API_KEY in .env`);
+    onToken(`Error: ${error.message}. Please check your API key in .env`);
   }
 }
 
