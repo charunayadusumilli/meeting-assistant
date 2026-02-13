@@ -402,26 +402,71 @@ A: {first-person, spoken-style answer in clear paragraphs}
       const query = new URLSearchParams(window.location.search);
       const windowType = query.get('window') || 'main';
 
+      if (!window.__pulseUIVersion) {
+        window.__pulseUIVersion = '2.0';
+        console.log('[Pulse] UI Patcher v2.0 initialized for window type:', windowType);
+      }
+
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let node;
+      let textChanges = 0;
       while (node = walker.nextNode()) {
         const val = node.nodeValue.trim();
-        if (val === 'Create Meeting Assistant in Meeting Assistant') node.nodeValue = 'Create New Assistant';
-        if (val === 'Pick the meeting assistant you want Meeting Assistant to use') node.nodeValue = 'Select Assistant Persona';
+        if (val === 'Create Meeting Assistant in Meeting Assistant') {
+          node.nodeValue = 'Create New Assistant';
+          textChanges++;
+        }
+        if (val === 'Pick the meeting assistant you want Meeting Assistant to use') {
+          node.nodeValue = 'Select Assistant Persona';
+          textChanges++;
+        }
         if (node.nodeValue && /\bTrial\b/i.test(node.nodeValue)) {
           node.nodeValue = node.nodeValue.replace(/\bTrial\b/gi, '').replace(/\s{2,}/g, ' ').trim();
+          textChanges++;
         }
+      }
+
+      if (textChanges > 0 && !window.__pulseTextPatched) {
+        console.log(`[Pulse] Applied ${textChanges} text replacements`);
+        window.__pulseTextPatched = true;
       }
 
       const buttons = Array.from(document.querySelectorAll('button'));
 
       // Find and handle buttons in settings window
       if (windowType === 'settings' || windowType === 'main') {
-        // Hide "Start Trial Session" button (the lightning bolt one)
+        // Hide "Start Trial Session" button - multiple methods for robustness
         buttons.forEach(btn => {
           const text = btn.textContent.trim();
-          if (text.includes('Start') && (text.includes('Trial') || btn.innerHTML.includes('fa-bolt') || btn.innerHTML.includes('⚡'))) {
+          const html = btn.innerHTML;
+
+          // Method 1: Check for "Trial" text
+          if (text.includes('Trial') && text.includes('Session')) {
             btn.style.display = 'none';
+            btn.style.visibility = 'hidden';
+            btn.style.opacity = '0';
+            btn.style.pointerEvents = 'none';
+            btn.style.position = 'absolute';
+            btn.style.left = '-9999px';
+            console.log('[Pulse] Hid Trial Session button via text match');
+          }
+
+          // Method 2: Check for lightning bolt icon
+          if (html.includes('fa-bolt') || html.includes('⚡') || html.includes('bolt')) {
+            if (text.includes('Trial') || text.includes('Start')) {
+              btn.style.display = 'none';
+              btn.style.visibility = 'hidden';
+              btn.style.opacity = '0';
+              btn.style.pointerEvents = 'none';
+              console.log('[Pulse] Hid Trial Session button via icon match');
+            }
+          }
+
+          // Method 3: Check for specific button structure (blue outlined button)
+          if (text === 'Start Trial Session' || text === '⚡ Start Trial Session') {
+            btn.style.display = 'none';
+            btn.style.visibility = 'hidden';
+            console.log('[Pulse] Hid Trial Session button via exact text match');
           }
         });
 
@@ -433,17 +478,23 @@ A: {first-person, spoken-style answer in clear paragraphs}
 
         if (createAssistantBtn) {
           // Update button text if needed
-          if (createAssistantBtn.textContent.includes('Create Meeting Assistant in Meeting Assistant')) {
+          const currentText = createAssistantBtn.textContent.trim();
+          if (currentText.includes('Create Meeting Assistant in Meeting Assistant')) {
             createAssistantBtn.textContent = 'Create New Assistant';
+            console.log('[Pulse] Updated Create button text');
           }
 
           // Hook into the button to show our custom modal
-          const origOnClick = createAssistantBtn.onclick;
-          createAssistantBtn.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            showCreateAssistantModal(null);
-          };
+          if (!createAssistantBtn.dataset.pulsePatched) {
+            createAssistantBtn.dataset.pulsePatched = 'true';
+            const origOnClick = createAssistantBtn.onclick;
+            createAssistantBtn.onclick = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              showCreateAssistantModal(null);
+            };
+            console.log('[Pulse] Hooked Create button click handler');
+          }
         }
       }
 
