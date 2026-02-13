@@ -414,10 +414,44 @@ A: {first-person, spoken-style answer in clear paragraphs}
       }
 
       const buttons = Array.from(document.querySelectorAll('button'));
+
+      // Find and handle buttons in settings window
+      if (windowType === 'settings' || windowType === 'main') {
+        // Hide "Start Trial Session" button (the lightning bolt one)
+        buttons.forEach(btn => {
+          const text = btn.textContent.trim();
+          if (text.includes('Start') && (text.includes('Trial') || btn.innerHTML.includes('fa-bolt') || btn.innerHTML.includes('⚡'))) {
+            btn.style.display = 'none';
+          }
+        });
+
+        // Find and reposition "Create Meeting Assistant" button
+        const createAssistantBtn = buttons.find(btn =>
+          btn.textContent.includes('Create') &&
+          (btn.textContent.includes('Assistant') || btn.textContent.includes('Meeting'))
+        );
+
+        if (createAssistantBtn) {
+          // Update button text if needed
+          if (createAssistantBtn.textContent.includes('Create Meeting Assistant in Meeting Assistant')) {
+            createAssistantBtn.textContent = 'Create New Assistant';
+          }
+
+          // Hook into the button to show our custom modal
+          const origOnClick = createAssistantBtn.onclick;
+          createAssistantBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showCreateAssistantModal(null);
+          };
+        }
+      }
+
+      // Handle duplicate "Start Session" buttons
       let startSessionBtns = buttons.filter(btn => btn.textContent.includes('Start Session'));
       if (startSessionBtns.length > 1) {
         startSessionBtns.forEach((btn, idx) => {
-          if (idx > 0 || btn.innerHTML.includes('fa-bolt') || btn.textContent.includes('âí')) {
+          if (idx > 0 || btn.innerHTML.includes('fa-bolt') || btn.textContent.includes('⚡')) {
             btn.style.display = 'none';
           }
         });
@@ -447,7 +481,7 @@ A: {first-person, spoken-style answer in clear paragraphs}
       const editBtnId = 'pulse-edit-btn';
       const existingEditBtn = document.getElementById(editBtnId);
 
-      if (windowType === 'main') {
+      if (windowType === 'settings' || windowType === 'main') {
         const headers = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6, div, span'));
         const assistantHeader = headers.find(el => el.textContent.trim() === 'ASSISTANT');
 
@@ -458,22 +492,32 @@ A: {first-person, spoken-style answer in clear paragraphs}
             parent.style.justifyContent = 'space-between';
             parent.style.alignItems = 'center';
             parent.style.position = 'relative';
+            parent.style.gap = '12px';
 
             const editBtn = document.createElement('button');
             editBtn.id = editBtnId;
-            editBtn.innerHTML = '&#9998; Edit Current';
+            editBtn.innerHTML = '✏️ Edit';
             Object.assign(editBtn.style, {
               backgroundColor: '#262626',
               border: '1px solid #404040',
               color: '#e5e5e5',
               borderRadius: '6px',
-              padding: '4px 10px',
-              fontSize: '12px',
+              padding: '6px 12px',
+              fontSize: '13px',
+              fontWeight: '500',
               cursor: 'pointer',
-              marginLeft: 'auto'
+              marginLeft: 'auto',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.2s ease'
             });
-            editBtn.onmouseenter = () => editBtn.style.backgroundColor = '#333';
-            editBtn.onmouseleave = () => editBtn.style.backgroundColor = '#262626';
+            editBtn.onmouseenter = () => {
+              editBtn.style.backgroundColor = '#333';
+              editBtn.style.borderColor = '#3b82f6';
+            };
+            editBtn.onmouseleave = () => {
+              editBtn.style.backgroundColor = '#262626';
+              editBtn.style.borderColor = '#404040';
+            };
             editBtn.onclick = async (e) => {
               e.preventDefault(); e.stopPropagation();
               try {
@@ -484,15 +528,16 @@ A: {first-person, spoken-style answer in clear paragraphs}
             };
             parent.appendChild(editBtn);
           }
-        } else if (!existingEditBtn) {
+        } else if (!existingEditBtn && windowType === 'main') {
+          // Fallback: Add edit button as fixed position in main window if header not found
           const editBtn = document.createElement('button');
           editBtn.id = editBtnId;
-          editBtn.innerHTML = '&#9998; Edit Current';
+          editBtn.innerHTML = '✏️ Edit';
           Object.assign(editBtn.style, {
             position: 'fixed', top: '80px', right: '30px', zIndex: 9000,
             backgroundColor: '#262626', border: '1px solid #404040', color: '#e5e5e5',
             borderRadius: '6px', padding: '8px 12px', fontSize: '13px',
-            cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+            fontWeight: '500', cursor: 'pointer', boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
           });
           editBtn.onclick = async (e) => {
             e.preventDefault(); e.stopPropagation();
