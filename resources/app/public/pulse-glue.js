@@ -70,23 +70,114 @@ const remoteError = (msg, error = null) => {
 
     if (windowType === 'session') {
       remoteLog('Initializing SpeechManager (Session Window)...');
-      await speechManager.init();
-      await speechManager.connect();
-      remoteLog('Connected to backend');
 
-      ipcRenderer.send('session-window-speech-ready');
+      try {
+        await speechManager.init();
+        remoteLog('SpeechManager initialized');
 
-      remoteLog('Auto-starting transcription...');
-      speechManager.start();
+        await speechManager.connect();
+        remoteLog('Connected to backend');
+
+        ipcRenderer.send('session-window-speech-ready');
+
+        // Small delay to ensure UI is ready
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        remoteLog('Starting transcription...');
+        speechManager.start();
+
+        // Add visual status indicator
+        addStatusIndicator();
+
+        // Verify speech started
+        setTimeout(() => {
+          const status = speechManager.getStatus();
+          remoteLog('Speech Status:', status);
+          if (!status.isActive) {
+            remoteError('Speech failed to start', status);
+
+            // Update indicator to error state
+            const indicator = document.getElementById('pulse-status-indicator');
+            if (indicator) {
+              indicator.style.backgroundColor = '#991b1b';
+              indicator.style.color = '#fca5a5';
+              indicator.style.borderColor = '#fca5a5';
+              indicator.textContent = '⚠ Mic Error';
+            }
+
+            // Try to restart
+            setTimeout(() => {
+              remoteLog('Attempting to restart speech...');
+              speechManager.start();
+            }, 1000);
+          } else {
+            remoteLog('✓ Transcription active');
+          }
+        }, 2000);
+
+      } catch (error) {
+        remoteError('Failed to initialize speech', error);
+        // Show user-friendly error
+        const errorDiv = document.createElement('div');
+        Object.assign(errorDiv.style, {
+          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: '#ef4444', color: 'white', padding: '12px 24px',
+          borderRadius: '8px', zIndex: 10000, fontSize: '14px', fontWeight: '500'
+        });
+        errorDiv.textContent = 'Microphone Error: ' + (error.message || 'Please allow microphone access');
+        document.body.appendChild(errorDiv);
+        setTimeout(() => errorDiv.remove(), 5000);
+      }
     } else {
       remoteLog('Connecting SpeechManager for questions/answers (Main Window)...');
       await speechManager.connect();
       remoteLog('Connected to backend (Main Window)');
     }
 
+    // Add visual status indicator
+    const addStatusIndicator = () => {
+      if (document.getElementById('pulse-status-indicator')) return;
+
+      const indicator = document.createElement('div');
+      indicator.id = 'pulse-status-indicator';
+      Object.assign(indicator.style, {
+        position: 'fixed', top: '10px', right: '10px', zIndex: 9999,
+        padding: '8px 16px', borderRadius: '20px', fontSize: '12px',
+        fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px',
+        backgroundColor: '#1f2937', color: '#10b981', border: '1px solid #10b981',
+        transition: 'all 0.3s ease'
+      });
+
+      const dot = document.createElement('div');
+      Object.assign(dot.style, {
+        width: '8px', height: '8px', borderRadius: '50%',
+        backgroundColor: '#10b981', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+      });
+
+      indicator.appendChild(dot);
+      indicator.appendChild(document.createTextNode('Listening'));
+      document.body.appendChild(indicator);
+
+      // Add pulse animation
+      if (!document.getElementById('pulse-keyframes')) {
+        const style = document.createElement('style');
+        style.id = 'pulse-keyframes';
+        style.textContent = '@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }';
+        document.head.appendChild(style);
+      }
+    };
+
     speechManager.onTranscript((text) => {
       console.log('[Pulse] Final Transcript:', text);
       window.dispatchEvent(new CustomEvent('pulse-transcript', { detail: { text, isFinal: true } }));
+
+      // Flash the indicator green on transcript
+      const indicator = document.getElementById('pulse-status-indicator');
+      if (indicator) {
+        indicator.style.backgroundColor = '#059669';
+        setTimeout(() => { indicator.style.backgroundColor = '#1f2937'; }, 200);
+      }
+
       // Bridge into bundle's SpeechService so React UI renders natively
       const svc = window.__bundleSpeechService;
       if (svc) {
@@ -508,23 +599,38 @@ A: {first-person, spoken-style answer in clear paragraphs}
         });
       }
 
-      if (windowType === 'session' && (speechManager.status === 'listening' || speechManager.status === 'connected')) {
-        document.querySelectorAll('div, h1, h2, span, p').forEach(el => {
-          if (el.textContent === 'Connecting' || el.textContent.includes('Connecting...')) {
-            let container = el;
-            for (let i = 0; i < 5; i++) {
-              if (container.parentElement) {
-                container = container.parentElement;
-                const style = window.getComputedStyle(container);
-                if (style.position === 'fixed' || style.zIndex > 100) {
-                  container.style.display = 'none';
-                  console.log('[Pulse] Hid stale Connecting overlay');
-                  break;
+      // Aggressively hide "Connecting" overlays in session window
+      if (windowType === 'session') {
+        const status = speechManager?.getStatus?.();
+        const isActive = status?.isActive || speechManager?.isActive;
+        const isConnected = status?.backendConnected || speechManager?.socket?.connected;
+
+        if (isActive || isConnected) {
+          // Hide any element containing "Connecting", "Correcting", or similar text
+          document.querySelectorAll('div, h1, h2, h3, span, p, section').forEach(el => {
+            const text = el.textContent.trim().toLowerCase();
+            if (text === 'connecting' || text === 'connecting...' || text === 'correcting' || text.includes('connecting')) {
+              let container = el;
+              // Traverse up to 10 levels to find the overlay container
+              for (let i = 0; i < 10; i++) {
+                if (container.parentElement) {
+                  container = container.parentElement;
+                  const style = window.getComputedStyle(container);
+                  // Hide if it's a fixed/absolute positioned overlay
+                  if ((style.position === 'fixed' || style.position === 'absolute') &&
+                      (parseInt(style.zIndex) > 100 || style.zIndex === 'auto')) {
+                    container.style.display = 'none';
+                    container.style.visibility = 'hidden';
+                    container.style.opacity = '0';
+                    container.style.pointerEvents = 'none';
+                    console.log('[Pulse] Hid Connecting overlay');
+                    break;
+                  }
                 }
               }
             }
-          }
-        });
+          });
+        }
       }
 
       document.querySelectorAll('div').forEach(div => { if (div.textContent.includes('Updates disabled in local build')) div.style.display = 'none'; });

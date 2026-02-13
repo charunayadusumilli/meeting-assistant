@@ -101,7 +101,7 @@ class WebSpeechProvider {
     return this;
   }
 
-  start() {
+  async start() {
     if (!this.recognition) {
       this.init();
     }
@@ -111,10 +111,24 @@ class WebSpeechProvider {
       return this;
     }
 
+    // Check microphone permissions first
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop()); // Release immediately
+      console.log('[WebSpeech] Microphone permission granted');
+    } catch (permError) {
+      console.error('[WebSpeech] Microphone permission denied:', permError);
+      if (this.callbacks.onError) {
+        this.callbacks.onError('not-allowed', permError);
+      }
+      return this;
+    }
+
     this._shouldRestart = true;
 
     try {
       this.recognition.start();
+      console.log('[WebSpeech] Started successfully');
     } catch (error) {
       console.error('[WebSpeech] Start error:', error);
       if (this.callbacks.onError) {
