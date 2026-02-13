@@ -753,3 +753,19 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`[backend] Listening on ${BASE_URL}`);
 });
+
+// Export testable functions for integration tests
+if (process.env.NODE_ENV === 'test') {
+  module.exports.__test__ = {
+    extractTranscriptText,
+    splitIntoChunks,
+    ingestTranscriptText,
+    ingestTranscriptFile,
+    finalizeSessionTranscript,
+    isQuestion,
+    detectAndAutoAnswer,
+    sessionBuffers,
+    autoDetectState,
+    ingestedFiles
+  };
+}
