@@ -68,6 +68,38 @@ const remoteError = (msg, error = null) => {
 
     remoteLog(`Initializing in ${windowType} window...`);
 
+    // Status indicator for session window - defined early so it's available during init
+    const addStatusIndicator = () => {
+      if (document.getElementById('pulse-status-indicator')) return;
+
+      const indicator = document.createElement('div');
+      indicator.id = 'pulse-status-indicator';
+      Object.assign(indicator.style, {
+        position: 'fixed', top: '10px', right: '10px', zIndex: 9999,
+        padding: '8px 16px', borderRadius: '20px', fontSize: '12px',
+        fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px',
+        backgroundColor: '#1f2937', color: '#10b981', border: '1px solid #10b981',
+        transition: 'all 0.3s ease'
+      });
+
+      const dot = document.createElement('div');
+      Object.assign(dot.style, {
+        width: '8px', height: '8px', borderRadius: '50%',
+        backgroundColor: '#10b981', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+      });
+
+      indicator.appendChild(dot);
+      indicator.appendChild(document.createTextNode('Listening'));
+      document.body.appendChild(indicator);
+
+      if (!document.getElementById('pulse-keyframes')) {
+        const style = document.createElement('style');
+        style.id = 'pulse-keyframes';
+        style.textContent = '@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }';
+        document.head.appendChild(style);
+      }
+    };
+
     if (windowType === 'session') {
       remoteLog('Initializing SpeechManager (Session Window)...');
 
@@ -133,39 +165,6 @@ const remoteError = (msg, error = null) => {
       await speechManager.connect();
       remoteLog('Connected to backend (Main Window)');
     }
-
-    // Add visual status indicator
-    const addStatusIndicator = () => {
-      if (document.getElementById('pulse-status-indicator')) return;
-
-      const indicator = document.createElement('div');
-      indicator.id = 'pulse-status-indicator';
-      Object.assign(indicator.style, {
-        position: 'fixed', top: '10px', right: '10px', zIndex: 9999,
-        padding: '8px 16px', borderRadius: '20px', fontSize: '12px',
-        fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px',
-        backgroundColor: '#1f2937', color: '#10b981', border: '1px solid #10b981',
-        transition: 'all 0.3s ease'
-      });
-
-      const dot = document.createElement('div');
-      Object.assign(dot.style, {
-        width: '8px', height: '8px', borderRadius: '50%',
-        backgroundColor: '#10b981', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
-      });
-
-      indicator.appendChild(dot);
-      indicator.appendChild(document.createTextNode('Listening'));
-      document.body.appendChild(indicator);
-
-      // Add pulse animation
-      if (!document.getElementById('pulse-keyframes')) {
-        const style = document.createElement('style');
-        style.id = 'pulse-keyframes';
-        style.textContent = '@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }';
-        document.head.appendChild(style);
-      }
-    };
 
     speechManager.onTranscript((text) => {
       console.log('[Pulse] Final Transcript:', text);
