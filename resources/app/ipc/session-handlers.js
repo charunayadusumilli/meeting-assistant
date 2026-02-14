@@ -146,17 +146,18 @@ function registerSessionHandlers({ ipcMain, sessionService, apiService, authServ
         return { success: false, error: 'No access token available', errorType: 'auth' };
       }
 
-      const huddleId = sessionData.assistantId; if (!huddleId) {
+      const assistantId = sessionData.assistantId;
+      if (!assistantId) {
         console.error('Cannot start session: assistantId is required');
         await handleSessionStartFailure({ message: 'Assistant ID is required', errorType: 'validation' });
         return { success: false, error: 'Assistant ID is required', errorType: 'validation' };
       }
 
-      console.log('Creating session via API for huddle:', huddleId);
+      console.log('Creating session for assistant:', assistantId);
 
       let sessionResponse;
       try {
-        sessionResponse = await apiService.createSession(huddleId);
+        sessionResponse = await apiService.createSession(assistantId);
         console.log('Session created via API:', sessionResponse);
       } catch (apiError) {
         console.error('Failed to create session via API:', apiError);

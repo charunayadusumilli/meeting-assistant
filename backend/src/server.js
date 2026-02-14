@@ -558,7 +558,7 @@ async function handleQuestion(socket, data) {
   console.log(`[server] Handling question from socket ${socket.id}:`, data?.content || data?.question || '(no text)');
   const requestId = data?.requestId ?? null;
   const question = data?.content || data?.message || data?.question || '';
-  const assistantId = data?.assistantId || data?.huddleId || data?.topicId || 'assistant-general';
+  const assistantId = data?.assistantId || data?.topicId || 'assistant-general';
 
   // Extract attachments (images)
   const attachments = data?.attachments || [];

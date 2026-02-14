@@ -30,6 +30,10 @@ const { fork } = require('child_process');
 
 app.setAppUserModelId('MeetingAssistant');
 
+// Override branding from compiled .exe (was "HuddleMate")
+app.setName('Meeting Assistant');
+if (app.setProductName) app.setProductName('Meeting Assistant');
+
 let backendProcess = null;
 
 function startBackend() {

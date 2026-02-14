@@ -514,6 +514,11 @@ A: {first-person, spoken-style answer in clear paragraphs}
           node.nodeValue = node.nodeValue.replace(/\bTrial\b/gi, '').replace(/\s{2,}/g, ' ').trim();
           textChanges++;
         }
+        // Replace all "HuddleMate" / "Huddle Mate" branding with "Meeting Assistant"
+        if (node.nodeValue && /huddle\s*mate/i.test(node.nodeValue)) {
+          node.nodeValue = node.nodeValue.replace(/huddle\s*mate/gi, 'Meeting Assistant');
+          textChanges++;
+        }
       }
 
       if (textChanges > 0 && !window.__pulseTextPatched) {

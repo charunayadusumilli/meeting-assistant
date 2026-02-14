@@ -35,9 +35,9 @@ class ApiService {
     return assistant;
   }
 
-  async createSession(huddleId) {
-    if (!huddleId) {
-      throw new Error('huddleId is required to create a session');
+  async createSession(assistantId) {
+    if (!assistantId) {
+      throw new Error('assistantId is required to create a session');
     }
 
     const sessionId = `local-session-${Date.now()}`;
@@ -45,7 +45,7 @@ class ApiService {
       _id: sessionId,
       id: sessionId,
       sessionId,
-      huddleId,
+      assistantId,
       createdAt: Date.now(),
       status: 'ready'
     };
